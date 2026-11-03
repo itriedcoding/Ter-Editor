@@ -10,6 +10,7 @@ import {
   shell,
 } from 'electron';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promises as fsp } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { ChatRequest, ExtEvent, Settings } from '../shared/ipc';
@@ -175,17 +176,13 @@ function registerAppProtocol(): void {
       let pathname = decodeURIComponent(url.pathname);
       if (pathname === '/' || pathname === '') pathname = '/index.html';
       const resolved = path.normalize(path.join(rendererRoot, pathname));
-      if (!resolved.startsWith(rendererRoot)) return new Response('Forbidden', { status: 403 });
-      return await net.fetch(pathToFileUrl(resolved));
+      const relative = path.relative(rendererRoot, resolved);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) return new Response('Forbidden', { status: 403 });
+      return await net.fetch(pathToFileURL(resolved).toString());
     } catch {
-      return await net.fetch(pathToFileUrl(path.join(rendererRoot, 'index.html')));
+      return await net.fetch(pathToFileURL(path.join(rendererRoot, 'index.html')).toString());
     }
   });
-}
-
-function pathToFileUrl(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, '/');
-  return `file://${normalized.startsWith('/') ? '' : '/'}${normalized.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 function buildMenu(): void {

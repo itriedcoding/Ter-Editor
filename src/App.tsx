@@ -232,7 +232,7 @@ export default function App() {
   const openFile = useCallback(
     async (targetPath: string) => {
       const existing = openFiles.find((file) => file.path === targetPath);
-      if (existing) {
+      if (existing || modelsRef.current.has(targetPath)) {
         setActivePath(targetPath);
         return;
       }
