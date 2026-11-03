@@ -64,7 +64,18 @@ jobs:
         run: npm run typecheck
 
       - name: Smoke test native filesystem, pty and language modules
-        run: npm run smoke
+        shell: bash
+        run: |
+          set +e
+          npm run smoke 2>&1 | tee smoke.log
+          status=${PIPESTATUS[0]}
+          {
+            echo "### Smoke output ($(uname -s) $(uname -m))"
+            echo '```'
+            tail -c 5000 smoke.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
 
       - name: Set version from dispatch input
         if: github.event_name == 'workflow_dispatch' && inputs.version != ''

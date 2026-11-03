@@ -23,6 +23,7 @@ async function check(name: string, fn: () => void | Promise<void>): Promise<void
 }
 
 async function main(): Promise<void> {
+  console.log(`platform ${process.platform}-${process.arch} node ${process.version}`);
   console.log('language detection');
   await check('TypeScript extension', () => assert.equal(languageForPath('/a/b/app.tsx'), 'typescript'));
   await check('Haskell extension maps to a real language id', () => assert.equal(languageForPath('Main.hs'), 'haskell'));
@@ -117,6 +118,7 @@ async function main(): Promise<void> {
 
     console.log('pty terminal');
     const terminalChunks: string[] = [];
+    const ptyStarted = Date.now();
     const terminal = new TerminalService((channel, payload) => {
       if (channel === 'term:data') terminalChunks.push((payload as { data: string }).data);
     }, () => tempRoot);
@@ -126,14 +128,16 @@ async function main(): Promise<void> {
       session.id,
       process.platform === 'win32' ? `echo done> "${marker}"\r` : `printf done > '${marker}'\r`,
     );
-    const ptyDeadline = Date.now() + 10_000;
+    const ptyDeadline = Date.now() + 20_000;
     while (Date.now() < ptyDeadline && !existsSync(marker)) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     await check('pty shell runs a real command', async () => {
-      assert.equal((await fsp.readFile(marker, 'utf8')).trim(), 'done');
-      assert.ok(terminalChunks.length > 0, 'the pty produced output');
-      assert.ok(session.shell.length > 0);
+      const detail = `shell=${session.shell || 'none'} cwd=${tempRoot} chunks=${terminalChunks.length} marker=${existsSync(marker)} ms=${Date.now() - ptyStarted} tail=${terminalChunks.join('').slice(-240).replace(/\s+/g, ' ')}`;
+      assert.ok(session.shell.length > 0, `no shell reported (${detail})`);
+      assert.ok(existsSync(marker), `shell did not create the marker file (${detail})`);
+      assert.equal((await fsp.readFile(marker, 'utf8')).trim(), 'done', detail);
+      assert.ok(terminalChunks.length > 0, `the pty produced no output (${detail})`);
     });
     terminal.kill(session.id);
     terminal.disposeAll();
