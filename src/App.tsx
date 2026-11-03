@@ -732,6 +732,7 @@ export default function App() {
         onNewProject={() => setNewProjectOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         onToggleChat={() => setChatOpen((value) => !value)}
+        onOpenPalette={() => setPalette('files')}
         platform={ter.platform}
       />
 

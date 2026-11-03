@@ -62,6 +62,7 @@
         "releaseType": "release"
       }
     ],    "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "zip"
@@ -80,6 +81,7 @@
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false
     },    "mac": {
+      "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "target": [
         "dmg",
@@ -88,6 +90,7 @@
       "hardenedRuntime": false
     },
     "linux": {
+      "icon": "build/icons",
       "category": "Development",
       "target": [
         "AppImage",

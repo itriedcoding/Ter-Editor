@@ -1,4 +1,4 @@
-import { FolderOpen, MessageSquare, Minus, Settings, Square, X } from 'lucide-react';
+import { FolderOpen, MessageSquare, Minus, Search, Settings, Square, X } from 'lucide-react';
 import { ter } from '../lib/bridge';
 
 interface TitleBarProps {
@@ -9,9 +9,10 @@ interface TitleBarProps {
   onNewProject: () => void;
   onOpenSettings: () => void;
   onToggleChat: () => void;
+  onOpenPalette: () => void;
 }
 
-export function TitleBar({ projectName, chatOpen, platform, onOpenFolder, onNewProject, onOpenSettings, onToggleChat }: TitleBarProps) {
+export function TitleBar({ projectName, chatOpen, platform, onOpenFolder, onNewProject, onOpenSettings, onToggleChat, onOpenPalette }: TitleBarProps) {
   const showControls = platform !== 'darwin';
   return (
     <header className={`titlebar ${platform === 'darwin' ? 'titlebar-mac' : ''}`}>
@@ -25,7 +26,13 @@ export function TitleBar({ projectName, chatOpen, platform, onOpenFolder, onNewP
           New Project
         </button>
       </div>
-      <div className="titlebar-center">{projectName ?? 'No folder open'}</div>
+      <div className="titlebar-center">
+        <button type="button" className="titlebar-search" onClick={onOpenPalette} title="Search files and commands (Ctrl+P)">
+          <Search size={13} />
+          <span className="titlebar-search-label">{projectName ?? 'No folder open'}</span>
+          <kbd>{platform === 'darwin' ? '⌘P' : 'Ctrl P'}</kbd>
+        </button>
+      </div>
       <div className="titlebar-right">
         <button
           type="button"

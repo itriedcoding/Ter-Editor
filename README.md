@@ -9,7 +9,7 @@ Built with Electron, React, Monaco (the editor component VS Code uses), Rust (N-
 ## What it actually does
 
 **Editor**
-- Monaco editing with syntax highlighting, bracket colouring, folding, multi-cursor, find/replace, minimap, word wrap and configurable fonts/tabs.
+- Monaco editing with syntax highlighting, bracket colouring, folding, multi-cursor, find/replace, minimap, word wrap and configurable fonts/tabs, in a Cursor-style chrome: flat dark panels, an icon activity bar, a search pill in the title bar, a tab strip with an accent underline, and a right-hand agent panel with a rounded composer.
 - Tabs with unsaved indicators, quick open (`Ctrl+P`), command palette (`Ctrl+Shift+P`), problems drawer, output channels and a real terminal.
 - Opens folders from disk, lazy tree, create/rename/delete, fuzzy file finder, project-wide text search.
 - New-project wizard writing runnable scaffolds: empty, static web, Node.js, Python, Rust, Go and C++.
@@ -92,7 +92,21 @@ npm run dist           # installers for the current OS (electron-builder)
 - **Tag a version:** `git tag v1.1.0 && git push origin v1.1.0`
 - **Or push a `release/*` branch / run the workflow manually:** Actions → *Release* → *Run workflow*.
 
-Artifacts: NSIS installer + portable zip (Windows x64), DMG + zip (macOS arm64 and x64), AppImage + deb + tar.gz (Linux x64). Builds are unsigned, so Gatekeeper/SmartScreen warn on first launch.
+Artifacts: NSIS installer + portable zip (Windows x64), DMG + zip (macOS arm64 and x64), AppImage + deb + tar.gz (Linux x64). Windows builds run on Windows 10 (21H2 or newer) and Windows 11. The app ships the custom Ter icon (`build/icon.png`, `.ico`, `.icns`, `build/icons/`, regenerated with `python3 scripts/make-icons.py`).
+
+### Code signing
+
+The packaging step signs and notarises automatically when these repository secrets exist (Settings → Secrets and variables → Actions):
+
+| Secret | Platform | Purpose |
+| --- | --- | --- |
+| `CSC_LINK` | Windows, macOS | `.pfx` code-signing certificate (Windows) or `.p12` Developer ID Application certificate (macOS), as base64 or a URL |
+| `CSC_KEY_PASSWORD` | Windows, macOS | Password for that certificate |
+| `APPLE_ID` | macOS | Apple account used for notarization |
+| `APPLE_APP_SPECIFIC_PASSWORD` | macOS | App-specific password for that account |
+| `APPLE_TEAM_ID` | macOS | Team ID owning the Developer ID certificate |
+
+Signing certificates have to be bought from a certificate authority (a Windows OV/EV certificate, and an Apple Developer Program membership for macOS) — they cannot be generated in this repository. Until those secrets are added, installers are built unsigned, and Windows SmartScreen shows "Unknown publisher" while macOS Gatekeeper blocks the first launch until you allow it in System Settings → Privacy & Security.
 
 ---
 
@@ -126,7 +140,7 @@ Security posture: `contextIsolation` on, `nodeIntegration` off, renderer served 
 - No language servers: IntelliSense is Monaco's built-in JS/TS/JSON/CSS/HTML service plus extension diagnostics.
 - The AI agent cannot execute shell commands; use the terminal yourself.
 - Webview-based extension UIs are unsupported (see above).
-- Installers are unsigned.
+- Installers are unsigned until signing secrets are configured; see **Code signing**.
 - Windows arm64 and Linux arm64 are not packaged yet (the Rust and node-pty binaries are built per CI runner architecture).
 - Extensions shipping native modules may fail to load; the failure is logged to the Extension Host output.
 

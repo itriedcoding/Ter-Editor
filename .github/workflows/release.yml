@@ -88,10 +88,23 @@ jobs:
         run: npx electron-rebuild -f -w node-pty
 
       - name: Package installers
-        run: npx electron-builder ${{ matrix.args }} ${{ (github.event_name == 'push' || inputs.publish) && '--publish always' || '' }}
+        shell: bash
+        run: |
+          publish=""
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.publish }}" = "true" ]; then publish="--publish always"; fi
+          sign=""
+          if [[ "${{ matrix.args }}" == *"--mac"* ]] && [ -n "${APPLE_ID}" ]; then
+            sign="-c.mac.notarize=true -c.mac.hardenedRuntime=true"
+          fi
+          npx electron-builder ${{ matrix.args }} $publish $sign
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
