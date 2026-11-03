@@ -59,7 +59,11 @@ jobs:
 
       - name: Build node-pty from source (macOS pty helper)
         if: runner.os == 'macOS'
-        run: npm rebuild node-pty --build-from-source
+        run: |
+          # The shipped Darwin prebuilds contain a spawn-helper macOS refuses to
+          # execute, so drop them and compile the module (and helper) locally.
+          rm -rf node_modules/node-pty/prebuilds
+          npm rebuild node-pty --build-from-source
 
       - name: Build Rust filesystem core
         run: npm run build:native

@@ -1,6 +1,6 @@
 import { spawn, type IPty } from 'node-pty';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, statSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -37,10 +37,14 @@ export class TerminalService {
   ensureHelper(packageRoots: string[]): void {
     if (process.platform !== 'darwin') return;
     for (const root of packageRoots) {
-      for (const candidate of [
-        path.join(root, 'build', 'Release', 'spawn-helper'),
-        path.join(root, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper'),
-      ]) {
+      const releaseHelper = path.join(root, 'build', 'Release', 'spawn-helper');
+      const prebuiltHelper = path.join(root, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper');
+      try {
+        if (!existsSync(releaseHelper) && existsSync(prebuiltHelper)) copyFileSync(prebuiltHelper, releaseHelper);
+      } catch {
+        // Read-only installs keep whatever layout they shipped with.
+      }
+      for (const candidate of [releaseHelper, prebuiltHelper]) {
         try {
           if ((statSync(candidate).mode & 0o111) === 0) chmodSync(candidate, 0o755);
         } catch {
