@@ -126,6 +126,7 @@ async function main(): Promise<void> {
     const terminal = new TerminalService((channel, payload) => {
       if (channel === 'term:data') terminalChunks.push((payload as { data: string }).data);
     }, () => tempRoot);
+    terminal.ensureHelper([path.join(__dirname, '..', 'node_modules', 'node-pty')]);
     const marker = path.join(tempRoot, 'pty-ok.txt');
     try {
       const session = terminal.create({ cwd: tempRoot, cols: 90, rows: 24 });

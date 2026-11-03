@@ -1,5 +1,6 @@
 import { spawn, type IPty } from 'node-pty';
 import { randomUUID } from 'node:crypto';
+import { chmodSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -27,6 +28,27 @@ export class TerminalService {
     private readonly send: (channel: string, payload: unknown) => void,
     private readonly fallbackCwd: () => string | null,
   ) {}
+
+  /**
+   * macOS spawns through node-pty's `spawn-helper`, which loses its executable
+   * bit when the module is installed from the npm tarball or unpacked from an
+   * asar archive. Without it every spawn fails with "posix_spawnp failed".
+   */
+  ensureHelper(packageRoots: string[]): void {
+    if (process.platform !== 'darwin') return;
+    for (const root of packageRoots) {
+      for (const candidate of [
+        path.join(root, 'build', 'Release', 'spawn-helper'),
+        path.join(root, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper'),
+      ]) {
+        try {
+          if ((statSync(candidate).mode & 0o111) === 0) chmodSync(candidate, 0o755);
+        } catch {
+          // Only one of the layouts exists in any given install.
+        }
+      }
+    }
+  }
 
   private defaultShell(): string {
     if (process.platform === 'win32') {

@@ -49,6 +49,13 @@ function sendToRenderer(channel: string, payload: unknown): void {
 
 const terminalService = new TerminalService(sendToRenderer, () => fsService.getRoot());
 
+// node-pty's macOS spawn helper can arrive without its executable bit; restore it
+// for both the development tree and the asar-unpacked copy in a packaged build.
+terminalService.ensureHelper([
+  path.join(app.getAppPath(), 'node_modules', 'node-pty'),
+  path.join(process.resourcesPath ?? '', 'app.asar.unpacked', 'node_modules', 'node-pty'),
+]);
+
 /** Prefers a generally capable model when the user has not picked one yet. */
 function pickDefaultModel(models: Array<{ id: string }>): string | null {
   const preferences = [/claude/i, /gpt-5/i, /gpt/i, /gemini/i, /deepseek/i, /llama/i, /qwen/i];
