@@ -82,25 +82,38 @@ fn normalize(path: &Path) -> PathBuf {
     out
 }
 
+fn outside(target: &str) -> Error {
+    Error::from_reason(format!("Path is outside the open folder: {target}"))
+}
+
 /// Resolves `target` inside `root`, rejecting anything that escapes the workspace.
+///
+/// The containment comparison uses canonical paths because workspace roots are
+/// routinely symlinked or shortened by the OS: macOS maps `/var` to
+/// `/private/var`, and Windows temp folders come back as 8.3 short names. The
+/// returned path stays lexical so new files can be created inside a folder that
+/// does not exist yet.
 fn guard(root: &str, target: &str) -> Result<PathBuf> {
     let root_path = fs::canonicalize(root).map_err(|error| io_error("Cannot resolve workspace root", error))?;
     let raw = PathBuf::from(target);
     let absolute = if raw.is_absolute() { raw } else { root_path.join(raw) };
     let normalized = normalize(&absolute);
-    if !normalized.starts_with(&root_path) {
-        return Err(Error::from_reason(format!(
-            "Path is outside the open folder: {target}"
-        )));
-    }
-    if normalized.exists() {
-        if let Ok(real) = fs::canonicalize(&normalized) {
-            if !real.starts_with(&root_path) {
-                return Err(Error::from_reason(format!(
-                    "Path resolves outside the open folder: {target}"
-                )));
-            }
+
+    // Walk up to the nearest path that exists, canonicalise that, and check it.
+    let mut probe = normalized.clone();
+    loop {
+        if probe.exists() {
+            break;
         }
+        match probe.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => probe = parent.to_path_buf(),
+            _ => return Err(outside(target)),
+        }
+    }
+
+    let canonical_probe = fs::canonicalize(&probe).map_err(|error| io_error("Cannot resolve path", error))?;
+    if !canonical_probe.starts_with(&root_path) {
+        return Err(outside(target));
     }
     Ok(normalized)
 }
@@ -329,7 +342,7 @@ pub fn find_files(root: String, query: String, limit: Option<u32>) -> Result<Vec
         .collect())
 }
 
-fn search_file(path: &Path, needle_lower: &str, needle_len: usize, max_hits: usize) -> Vec<Hit> {
+fn search_file(path: &Path, needle_lower: &str, max_hits: usize) -> Vec<Hit> {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(_) => return Vec::new(),
@@ -359,7 +372,7 @@ fn search_file(path: &Path, needle_lower: &str, needle_len: usize, max_hits: usi
             hits.push(Hit {
                 path: path.to_string_lossy().to_string(),
                 line: index as u32 + 1,
-                column: (position / needle_len.max(1)) as u32 + 1,
+                column: lowered[..position].chars().count() as u32 + 1,
                 preview,
             });
             if hits.len() >= max_hits {
@@ -383,7 +396,7 @@ pub fn search_text(root: String, query: String, max_hits: Option<u32>) -> Result
     let per_file = 20usize;
     let mut hits: Vec<Hit> = files
         .par_iter()
-        .flat_map(|path| search_file(path, &needle_lower, needle.len(), per_file))
+        .flat_map(|path| search_file(path, &needle_lower, per_file))
         .collect();
     hits.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
     hits.truncate(limit);

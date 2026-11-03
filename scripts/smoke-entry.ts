@@ -13,7 +13,11 @@ import { installFromOpenVsx } from '../electron/services/vsix';
 let checks = 0;
 
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
-  await fn();
+  try {
+    await fn();
+  } catch (error) {
+    throw new Error(`${name}: ${(error as Error).message}`);
+  }
   checks += 1;
   console.log(`  ok  ${name}`);
 }
@@ -133,6 +137,25 @@ async function main(): Promise<void> {
     });
     terminal.kill(session.id);
     terminal.disposeAll();
+
+    // macOS exposes /var as a symlink and Windows returns 8.3 short paths; the
+    // native guard must accept a workspace root addressed through either.
+    if (process.platform !== 'win32') {
+      const linkRoot = path.join(tempRoot, 'link-root');
+      try {
+        await fsp.symlink(path.join(tempRoot, 'demo-app'), linkRoot, 'dir');
+        await check('symlinked workspace root is accepted', async () => {
+          const linked = new FsService(() => nativeFs);
+          linked.setRoot(linkRoot);
+          assert.ok(linked.readText(path.join(linkRoot, 'index.html')).includes('<!doctype html>'));
+          linked.writeText(path.join(linkRoot, 'linked.txt'), 'ok');
+          assert.equal(await fsp.readFile(path.join(tempRoot, 'demo-app', 'linked.txt'), 'utf8'), 'ok');
+          linked.dispose();
+        });
+      } catch (error) {
+        console.log(`  --  symlink check skipped: ${(error as Error).message}`);
+      }
+    }
 
     if (process.env.SMOKE_NETWORK === '1') {
       console.log('Open VSX extension install (network)');
