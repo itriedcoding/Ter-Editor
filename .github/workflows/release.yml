@@ -77,6 +77,19 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
+      - name: Preserve smoke log on failure
+        if: failure()
+        shell: bash
+        run: |
+          test -f smoke.log || exit 0
+          git config user.name "Ter CI"
+          git config user.email "ci@ter-editor.dev"
+          mkdir -p ci-logs
+          cp smoke.log "ci-logs/smoke-${RUNNER_OS}-${RUNNER_ARCH}.log"
+          git add -f ci-logs
+          git commit -m "ci: smoke log ${RUNNER_OS}-${RUNNER_ARCH}" || exit 0
+          git push origin "HEAD:ci-logs-${RUNNER_OS}-${RUNNER_ARCH}" || true
+
       - name: Set version from dispatch input
         if: github.event_name == 'workflow_dispatch' && inputs.version != ''
         run: npm version "${{ inputs.version }}" --no-git-tag-version --allow-same-version

@@ -11,19 +11,23 @@ import { fileUri, uriToPath } from '../shared/uri';
 import { installFromOpenVsx } from '../electron/services/vsix';
 
 let checks = 0;
+const failures: string[] = [];
 
 async function check(name: string, fn: () => void | Promise<void>): Promise<void> {
   try {
     await fn();
+    checks += 1;
+    console.log(`  ok  ${name}`);
   } catch (error) {
-    throw new Error(`${name}: ${(error as Error).message}`);
+    const message = (error as Error).message;
+    failures.push(`${name}: ${message}`);
+    console.log(`  FAIL ${name}: ${message}`);
   }
-  checks += 1;
-  console.log(`  ok  ${name}`);
 }
 
 async function main(): Promise<void> {
   console.log(`platform ${process.platform}-${process.arch} node ${process.version}`);
+  console.log(`shell ${process.env.SHELL ?? '(unset)'} comspec ${process.env.COMSPEC ?? '(unset)'}`);
   console.log('language detection');
   await check('TypeScript extension', () => assert.equal(languageForPath('/a/b/app.tsx'), 'typescript'));
   await check('Haskell extension maps to a real language id', () => assert.equal(languageForPath('Main.hs'), 'haskell'));
@@ -122,25 +126,31 @@ async function main(): Promise<void> {
     const terminal = new TerminalService((channel, payload) => {
       if (channel === 'term:data') terminalChunks.push((payload as { data: string }).data);
     }, () => tempRoot);
-    const session = terminal.create({ cwd: tempRoot, cols: 90, rows: 24 });
     const marker = path.join(tempRoot, 'pty-ok.txt');
-    terminal.write(
-      session.id,
-      process.platform === 'win32' ? `echo done> "${marker}"\r` : `printf done > '${marker}'\r`,
-    );
-    const ptyDeadline = Date.now() + 20_000;
-    while (Date.now() < ptyDeadline && !existsSync(marker)) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    try {
+      const session = terminal.create({ cwd: tempRoot, cols: 90, rows: 24 });
+      terminal.write(
+        session.id,
+        process.platform === 'win32' ? `echo done> "${marker}"\r` : `printf done > '${marker}'\r`,
+      );
+      const ptyDeadline = Date.now() + 20_000;
+      while (Date.now() < ptyDeadline && !existsSync(marker)) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      await check('pty shell runs a real command', async () => {
+        const detail = `shell=${session.shell || 'none'} cwd=${tempRoot} chunks=${terminalChunks.length} marker=${existsSync(marker)} ms=${Date.now() - ptyStarted} tail=${terminalChunks.join('').slice(-240).replace(/\s+/g, ' ')}`;
+        assert.ok(session.shell.length > 0, `no shell reported (${detail})`);
+        assert.ok(existsSync(marker), `shell did not create the marker file (${detail})`);
+        assert.equal((await fsp.readFile(marker, 'utf8')).trim(), 'done', detail);
+        assert.ok(terminalChunks.length > 0, `the pty produced no output (${detail})`);
+      });
+      terminal.kill(session.id);
+      terminal.disposeAll();
+    } catch (error) {
+      const message = (error as Error).message;
+      failures.push(`pty terminal: ${message}`);
+      console.log(`  FAIL pty terminal: ${message}`);
     }
-    await check('pty shell runs a real command', async () => {
-      const detail = `shell=${session.shell || 'none'} cwd=${tempRoot} chunks=${terminalChunks.length} marker=${existsSync(marker)} ms=${Date.now() - ptyStarted} tail=${terminalChunks.join('').slice(-240).replace(/\s+/g, ' ')}`;
-      assert.ok(session.shell.length > 0, `no shell reported (${detail})`);
-      assert.ok(existsSync(marker), `shell did not create the marker file (${detail})`);
-      assert.equal((await fsp.readFile(marker, 'utf8')).trim(), 'done', detail);
-      assert.ok(terminalChunks.length > 0, `the pty produced no output (${detail})`);
-    });
-    terminal.kill(session.id);
-    terminal.disposeAll();
 
     // macOS exposes /var as a symlink and Windows returns 8.3 short paths; the
     // native guard must accept a workspace root addressed through either.
@@ -182,6 +192,9 @@ async function main(): Promise<void> {
     await fsp.rm(tempRoot, { recursive: true, force: true });
   }
 
+  if (failures.length > 0) {
+    throw new Error(`${failures.length} check(s) failed:\n- ${failures.join('\n- ')}`);
+  }
   console.log(`\n${checks} checks passed`);
 }
 
