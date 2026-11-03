@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, promises as fsp } from 'node:fs';
+import { existsSync, promises as fsp, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { FsService } from '../electron/services/fs';
@@ -126,7 +126,18 @@ async function main(): Promise<void> {
     const terminal = new TerminalService((channel, payload) => {
       if (channel === 'term:data') terminalChunks.push((payload as { data: string }).data);
     }, () => tempRoot);
-    terminal.ensureHelper([path.join(__dirname, '..', 'node_modules', 'node-pty')]);
+    const ptyRoot = path.join(__dirname, '..', 'node_modules', 'node-pty');
+    terminal.ensureHelper([ptyRoot]);
+    for (const helper of [
+      path.join(ptyRoot, 'build', 'Release', 'spawn-helper'),
+      path.join(ptyRoot, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper'),
+    ]) {
+      try {
+        console.log(`  pty helper mode=${(statSync(helper).mode & 0o777).toString(8)} ${helper}`);
+      } catch {
+        console.log(`  pty helper missing ${helper}`);
+      }
+    }
     const marker = path.join(tempRoot, 'pty-ok.txt');
     try {
       const session = terminal.create({ cwd: tempRoot, cols: 90, rows: 24 });

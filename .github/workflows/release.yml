@@ -57,6 +57,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build node-pty from source (macOS pty helper)
+        if: runner.os == 'macOS'
+        run: npm rebuild node-pty --build-from-source
+
       - name: Build Rust filesystem core
         run: npm run build:native
 
