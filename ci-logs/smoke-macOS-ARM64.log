@@ -1,0 +1,63 @@
+
+> ter-editor@1.1.0 smoke
+> npm run build:native && npm run build:main && node scripts/smoke.mjs
+
+
+> ter-editor@1.1.0 build:native
+> node scripts/build-native.mjs
+
+[build-native] compiling Rust filesystem core
+[1m[92m    Finished[0m `release` profile [optimized] target(s) in 0.06s
+[build-native] wrote native/ter-fs.darwin-arm64.node
+
+> ter-editor@1.1.0 build:main
+> node scripts/build-main.mjs
+
+
+  dist-electron/preload.js       6.5kb
+  dist-electron/preload.js.map  10.0kb
+
+⚡ Done in 20ms
+
+  dist-electron/main.js      228.0kb
+  dist-electron/main.js.map  428.9kb
+
+⚡ Done in 32ms
+[build-main] done
+platform darwin-arm64 node v22.23.4
+shell /bin/bash comspec (unset)
+language detection
+  ok  TypeScript extension
+  ok  Haskell extension maps to a real language id
+  ok  Dockerfile filename
+  ok  dotenv filename
+  ok  unknown extension falls back to plaintext
+  ok  binary detection
+  ok  language label
+text helpers
+  ok  offsetAt round trip
+  ok  applyTextEdits applies from the end
+uri helpers
+  ok  unix path round trip
+  ok  windows path round trip
+filesystem service
+  ok  Rust filesystem core loads
+  ok  project scaffold created
+  ok  template files have real content
+  ok  binary guard
+  ok  list returns sorted entries
+  ok  write then read text
+  ok  create file with content
+  ok  rename moves the file
+  ok  fuzzy file find
+  ok  text search returns line hits
+  ok  path escape is rejected
+  ok  non-empty target folder is rejected
+  ok  remove deletes a directory
+pty terminal
+  FAIL pty terminal: posix_spawnp failed.
+  ok  symlinked workspace root is accepted
+
+Smoke test failed: Error: 1 check(s) failed:
+- pty terminal: posix_spawnp failed.
+    at main (/Users/runner/work/Ter-Editor/Ter-Editor/.smoke/smoke.cjs:4095:11)
