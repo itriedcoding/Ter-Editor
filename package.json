@@ -1,6 +1,6 @@
 {
   "name": "ter-editor",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Ter Editor — an AI-native desktop code editor with VS Code extension support",
   "author": {
     "name": "Ter Editor contributors",
@@ -61,7 +61,8 @@
         "provider": "github",
         "releaseType": "release"
       }
-    ],    "win": {
+    ],
+    "win": {
       "icon": "build/icon.ico",
       "target": [
         "nsis",
@@ -80,7 +81,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false
-    },    "mac": {
+    },
+    "mac": {
       "icon": "build/icon.icns",
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
