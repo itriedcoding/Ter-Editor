@@ -79,7 +79,8 @@ export default function App() {
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [problems, setProblems] = useState<Record<string, DiagnosticItem[]>>({});
   const [output, setOutput] = useState<Record<string, string>>({});
-  const [bottom, setBottom] = useState<'problems' | 'output' | null>(null);
+  const [bottom, setBottom] = useState<'problems' | 'output' | 'terminal' | null>(null);
+  const [nativeVersion, setNativeVersion] = useState('');
   const [outputChannel, setOutputChannel] = useState('Extension Host');
   const [statusItems, setStatusItems] = useState<StatusItem[]>([]);
   const [extCommands, setExtCommands] = useState<ExtCommand[]>([]);
@@ -183,6 +184,11 @@ export default function App() {
       monaco.editor.setTheme(loaded.extensionTheme ?? loaded.theme);
       setRecent(loaded.recentProjects);
       setHasKey(await ter.ai.hasKey());
+      try {
+        setNativeVersion(await ter.app.nativeVersion());
+      } catch {
+        setNativeVersion('native filesystem unavailable');
+      }
       const modelList = await ter.ai.models();
       if (disposed) return;
       setModels(modelList.models);
@@ -579,6 +585,9 @@ export default function App() {
         case 'view.output':
           setBottom((value) => (value === 'output' ? null : 'output'));
           break;
+        case 'view.terminal':
+          setBottom((value) => (value === 'terminal' ? null : 'terminal'));
+          break;
         case 'preferences.settings':
           setSettingsOpen(true);
           break;
@@ -622,6 +631,9 @@ export default function App() {
       } else if (key === 'j') {
         event.preventDefault();
         setChatOpen((value) => !value);
+      } else if (key === '`') {
+        event.preventDefault();
+        setBottom((value) => (value === 'terminal' ? null : 'terminal'));
       } else if (key === ',') {
         event.preventDefault();
         setSettingsOpen(true);
@@ -687,6 +699,7 @@ export default function App() {
       { id: 'view.toggle-chat', title: 'View: Toggle AI Chat' },
       { id: 'view.problems', title: 'View: Toggle Problems' },
       { id: 'view.output', title: 'View: Toggle Output' },
+      { id: 'view.terminal', title: 'View: Toggle Terminal' },
       { id: 'preferences.settings', title: 'Preferences: Open Settings' },
       { id: 'ai.new-chat', title: 'AI: New Chat' },
       { id: 'ai.explain-selection', title: 'AI: Explain Selection' },
@@ -797,6 +810,7 @@ export default function App() {
           }}
           hasTextMate={activeFile ? hasTextMateSupport(activeFile.language) : false}
           onOpenPalette={() => setPalette('files')}
+          projectRoot={project?.root ?? null}
         />
 
         {chatOpen && (
@@ -826,6 +840,7 @@ export default function App() {
         extensionCount={extensionStatus}
         statusItems={statusItems}
         themeLabel={themes.find((theme) => theme.id === (settings.extensionTheme ?? settings.theme))?.label ?? settings.theme}
+        nativeVersion={nativeVersion}
         onCommand={runCommand}
         onOpenProblems={() => setBottom((value) => (value === 'problems' ? null : 'problems'))}
         onOpenSettings={() => setSettingsOpen(true)}

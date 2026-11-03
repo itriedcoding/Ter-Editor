@@ -12,7 +12,7 @@ const shared = {
   target: 'node22',
   format: 'cjs',
   sourcemap: true,
-  external: ['electron'],
+  external: ['electron', 'node-pty'],
   logLevel: 'info',
   define: {
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),

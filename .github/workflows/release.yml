@@ -19,6 +19,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build ${{ matrix.name }}
@@ -27,15 +31,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Windows
+          - name: Windows x64
             os: windows-latest
-            args: --win
-          - name: macOS
+            args: --win --x64
+          - name: macOS arm64
             os: macos-latest
-            args: --mac
-          - name: Linux
+            args: --mac --arm64
+          - name: macOS x64
+            os: macos-15-intel
+            args: --mac --x64
+          - name: Linux x64
             os: ubuntu-latest
-            args: --linux
+            args: --linux --x64
     steps:
       - uses: actions/checkout@v4
 
@@ -44,13 +51,19 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Build Rust filesystem core
+        run: npm run build:native
 
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Smoke test filesystem and language modules
+      - name: Smoke test native filesystem, pty and language modules
         run: npm run smoke
 
       - name: Set version from dispatch input
@@ -59,6 +72,9 @@ jobs:
 
       - name: Build renderer and main process
         run: npm run build
+
+      - name: Rebuild node-pty for the Electron ABI
+        run: npx electron-rebuild -f -w node-pty
 
       - name: Package installers
         run: npx electron-builder ${{ matrix.args }} ${{ (github.event_name == 'push' || inputs.publish) && '--publish always' || '' }}

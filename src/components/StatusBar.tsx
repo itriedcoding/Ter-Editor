@@ -11,6 +11,7 @@ interface StatusBarProps {
   extensionCount: number;
   statusItems: StatusItem[];
   themeLabel: string;
+  nativeVersion: string;
   onCommand: (id: string) => void;
   onOpenProblems: () => void;
   onOpenSettings: () => void;
@@ -68,6 +69,9 @@ export function StatusBar(props: StatusBarProps) {
           <Palette size={12} />
           {props.themeLabel}
         </button>
+        <span className="status-text" title={props.nativeVersion}>
+          Rust fs
+        </span>
         {props.language && <span className="status-text">{props.language}</span>}
         <span className="status-text">
           Ln {props.cursor.line}, Col {props.cursor.column}

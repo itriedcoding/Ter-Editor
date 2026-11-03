@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, AlertTriangle, ChevronDown, Info, X } from 'lucide-react';
 import type { DiagnosticItem, Settings } from '../../shared/ipc';
 import type { OpenFileState } from '../App';
 import { monaco } from '../lib/monaco';
+import { TerminalPanel } from './TerminalPanel';
 
 interface EditorAreaProps {
   openFiles: OpenFileState[];
@@ -11,8 +12,8 @@ interface EditorAreaProps {
   settings: Settings;
   problems: DiagnosticItem[];
   allProblems: Record<string, DiagnosticItem[]>;
-  bottom: 'problems' | 'output' | null;
-  setBottom: (value: 'problems' | 'output' | null) => void;
+  bottom: 'problems' | 'output' | 'terminal' | null;
+  setBottom: (value: 'problems' | 'output' | 'terminal' | null) => void;
   output: Record<string, string>;
   outputChannel: string;
   setOutputChannel: (channel: string) => void;
@@ -23,6 +24,7 @@ interface EditorAreaProps {
   onOpenFileAt: (path: string, line: number, column: number) => void;
   hasTextMate: boolean;
   onOpenPalette: () => void;
+  projectRoot: string | null;
 }
 
 export function EditorArea(props: EditorAreaProps) {
@@ -30,6 +32,11 @@ export function EditorArea(props: EditorAreaProps) {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const onSaveRef = useRef(props.onSave);
   const onPaletteRef = useRef(props.onOpenPalette);
+  const [terminalOpened, setTerminalOpened] = useState(false);
+
+  useEffect(() => {
+    if (props.bottom === 'terminal') setTerminalOpened(true);
+  }, [props.bottom]);
 
   onSaveRef.current = props.onSave;
   onPaletteRef.current = props.onOpenPalette;
@@ -209,6 +216,9 @@ export function EditorArea(props: EditorAreaProps) {
           <button type="button" className={`drawer-tab ${props.bottom === 'output' ? 'active' : ''}`} onClick={() => props.setBottom(props.bottom === 'output' ? null : 'output')}>
             Output
           </button>
+          <button type="button" className={`drawer-tab ${props.bottom === 'terminal' ? 'active' : ''}`} onClick={() => props.setBottom(props.bottom === 'terminal' ? null : 'terminal')}>
+            Terminal
+          </button>
           {channels.length > 0 && props.bottom === 'output' && (
             <div className="channel-picker">
               <select value={activeChannel} onChange={(event) => props.setOutputChannel(event.target.value)}>
@@ -246,6 +256,11 @@ export function EditorArea(props: EditorAreaProps) {
         {props.bottom === 'output' && (
           <div className="drawer-body">
             <pre className="output-pre">{props.output[activeChannel] || 'No output yet.'}</pre>
+          </div>
+        )}
+        {terminalOpened && (
+          <div className={`terminal-slot ${props.bottom === 'terminal' ? 'visible' : 'hidden'}`}>
+            <TerminalPanel cwd={props.projectRoot} />
           </div>
         )}
       </div>

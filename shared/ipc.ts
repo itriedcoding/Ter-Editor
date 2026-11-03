@@ -229,6 +229,19 @@ export interface DocumentSyncState {
   version: number;
 }
 
+export interface TerminalOptions {
+  cwd?: string;
+  cols?: number;
+  rows?: number;
+  shell?: string;
+}
+
+export interface TerminalSession {
+  id: string;
+  shell: string;
+  cwd: string;
+}
+
 export interface TerApi {
   platform: string;
   version: string;
@@ -292,9 +305,18 @@ export interface TerApi {
     onEvent(cb: (event: ExtEvent) => void): () => void;
     onChanged(cb: () => void): () => void;
   };
+  terminal: {
+    create(options: TerminalOptions): Promise<TerminalSession>;
+    write(id: string, data: string): void;
+    resize(id: string, cols: number, rows: number): void;
+    kill(id: string): void;
+    onData(callback: (id: string, data: string) => void): () => void;
+    onExit(callback: (id: string, code: number) => void): () => void;
+  };
   app: {
     openExternal(url: string): void;
     showItemInFolder(path: string): void;
     windowControl(action: 'minimize' | 'maximize' | 'close'): void;
+    nativeVersion(): Promise<string>;
   };
 }

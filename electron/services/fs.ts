@@ -1,25 +1,42 @@
-import { promises as fsp, watch, FSWatcher } from 'node:fs';
+import { watch, FSWatcher } from 'node:fs';
 import path from 'node:path';
 import type { CreateProjectInput, FileEntry, FileNode, ProjectSnapshot, SearchHit } from '../../shared/ipc';
+import type { NativeFs } from '../native/fs';
 
 const IGNORED_DIRS = new Set([
   'node_modules', '.git', '.hg', '.svn', 'dist', 'dist-electron', 'release', 'out', 'build',
   '.next', '.nuxt', '.cache', '.parcel-cache', 'target', 'vendor', '.venv', 'venv', '__pycache__',
-  '.idea', '.gradle', '.mypy_cache', '.pytest_cache', '.tox', '.DS_Store', 'coverage', '.turbo',
+  '.idea', '.gradle', '.mypy_cache', '.pytest_cache', '.tox', 'coverage', '.turbo', 'native',
 ]);
 
-const MAX_INDEX_FILES = 40_000;
-const MAX_SEARCH_BYTES = 2_000_000;
-
-function isProbablyBinary(buffer: Buffer): boolean {
-  const sample = buffer.subarray(0, Math.min(buffer.length, 8000));
-  return sample.includes(0);
-}
-
+/**
+ * Workspace filesystem. Every operation on an open project is executed by the
+ * Rust core (see native/src/lib.rs), which validates paths against the workspace
+ * root before touching disk. Node is only used to bootstrap projects (before a
+ * root exists) and to watch for external changes.
+ */
 export class FsService {
   private root: string | null = null;
+  private nativeModule: NativeFs | null = null;
   private watchers: FSWatcher[] = [];
   private onChanged: (paths: string[]) => void = () => {};
+
+  constructor(private readonly resolveNative: () => NativeFs) {}
+
+  private native(): NativeFs {
+    if (!this.nativeModule) {
+      try {
+        this.nativeModule = this.resolveNative();
+      } catch (error) {
+        throw new Error(`The native filesystem core is unavailable: ${(error as Error).message}`);
+      }
+    }
+    return this.nativeModule;
+  }
+
+  nativeVersion(): string {
+    return this.native().nativeVersion();
+  }
 
   setChangeListener(listener: (paths: string[]) => void): void {
     this.onChanged = listener;
@@ -52,9 +69,9 @@ export class FsService {
     try {
       const watcher = watch(root, { recursive: true }, (_event, filename) => {
         if (!filename) return;
-        const rel = filename.toString();
-        if (rel.split(/[\\/]/).some((part) => IGNORED_DIRS.has(part))) return;
-        pending.add(rel);
+        const relative = filename.toString();
+        if (relative.split(/[\\/]/).some((part) => IGNORED_DIRS.has(part))) return;
+        pending.add(relative);
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => {
           const paths = Array.from(pending);
@@ -71,19 +88,9 @@ export class FsService {
       });
       this.watchers.push(watcher);
     } catch {
-      // Recursive watching is unavailable on some platforms; the explorer refreshes
-      // after editor-initiated file operations instead.
+      // Recursive watching is not available on every platform/filesystem; the
+      // explorer still refreshes after editor-initiated file operations.
     }
-  }
-
-  resolveInRoot(target: string): string {
-    if (!this.root) throw new Error('No folder is open');
-    const absolute = path.resolve(target);
-    const relative = path.relative(this.root, absolute);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      throw new Error(`Path is outside the open folder: ${target}`);
-    }
-    return absolute;
   }
 
   resolveRoot(): string {
@@ -91,229 +98,118 @@ export class FsService {
     return this.root;
   }
 
-  async list(dir: string): Promise<FileEntry[]> {
-    const absolute = this.resolveInRoot(dir);
-    const entries = await fsp.readdir(absolute, { withFileTypes: true });
-    const results: FileEntry[] = [];
-    for (const entry of entries) {
-      if (entry.name === '.git') continue;
-      const full = path.join(absolute, entry.name);
-      let size = 0;
-      let mtime = 0;
-      try {
-        const stat = await fsp.stat(full);
-        size = stat.size;
-        mtime = stat.mtimeMs;
-      } catch {
-        continue;
-      }
-      results.push({
-        name: entry.name,
-        path: full,
-        isDir: entry.isDirectory(),
-        size,
-        mtime,
-      });
+  resolveInRoot(target: string): string {
+    const root = this.resolveRoot();
+    const absolute = path.resolve(target);
+    const relative = path.relative(root, absolute);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`Path is outside the open folder: ${target}`);
     }
-    results.sort((a, b) => {
-      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-    });
-    return results;
+    return absolute;
   }
 
-  async tree(dir: string, depth = 2, skipIgnored = true): Promise<FileNode> {
+  list(dir: string): FileEntry[] {
+    return this.native().listDir(this.resolveRoot(), dir) as FileEntry[];
+  }
+
+  tree(dir: string, depth = 2, skipIgnored = true): FileNode {
     const absolute = this.resolveInRoot(dir);
-    const node: FileNode = { name: path.basename(absolute) || absolute, path: absolute, isDir: true, children: [] };
+    const node: FileNode = {
+      name: path.basename(absolute) || absolute,
+      path: absolute,
+      isDir: true,
+      children: [],
+    };
     if (depth <= 0) {
       delete node.children;
       return node;
     }
-    const entries = await this.list(absolute);
-    for (const entry of entries) {
+    for (const entry of this.list(absolute)) {
       if (skipIgnored && entry.isDir && IGNORED_DIRS.has(entry.name)) continue;
-      if (entry.isDir) {
-        node.children!.push(await this.tree(entry.path, depth - 1, skipIgnored));
-      } else {
-        node.children!.push({ name: entry.name, path: entry.path, isDir: false });
-      }
+      node.children!.push(
+        entry.isDir
+          ? this.tree(entry.path, depth - 1, skipIgnored)
+          : { name: entry.name, path: entry.path, isDir: false },
+      );
     }
     return node;
   }
 
-  async readText(target: string): Promise<string> {
-    const absolute = this.resolveInRoot(target);
-    const buffer = await fsp.readFile(absolute);
-    if (isProbablyBinary(buffer)) {
-      throw new Error(`${path.basename(absolute)} is a binary file and cannot be opened as text`);
+  readText(target: string): string {
+    return this.native().readText(this.resolveRoot(), target);
+  }
+
+  writeText(target: string, content: string): void {
+    this.native().writeText(this.resolveRoot(), target, content);
+  }
+
+  create(target: string, kind: 'file' | 'folder', content = ''): void {
+    this.native().createEntry(this.resolveRoot(), target, kind);
+    if (kind === 'file' && content.length > 0) {
+      this.native().writeText(this.resolveRoot(), target, content);
     }
-    return buffer.toString('utf8');
   }
 
-  async writeText(target: string, content: string): Promise<void> {
-    const absolute = this.resolveInRoot(target);
-    await fsp.mkdir(path.dirname(absolute), { recursive: true });
-    await fsp.writeFile(absolute, content, 'utf8');
+  remove(target: string): void {
+    this.native().removeEntry(this.resolveRoot(), target);
   }
 
-  async create(target: string, kind: 'file' | 'folder', content = ''): Promise<void> {
-    const absolute = this.resolveInRoot(target);
-    if (kind === 'folder') {
-      await fsp.mkdir(absolute, { recursive: true });
-      return;
-    }
-    await fsp.mkdir(path.dirname(absolute), { recursive: true });
-    const handle = await fsp.open(absolute, 'wx');
-    await handle.writeFile(content, 'utf8');
-    await handle.close();
+  rename(from: string, to: string): void {
+    this.native().renameEntry(this.resolveRoot(), from, to);
   }
 
-  async remove(target: string): Promise<void> {
-    const absolute = this.resolveInRoot(target);
-    if (absolute === this.root) throw new Error('Refusing to delete the open folder');
-    await fsp.rm(absolute, { recursive: true, force: false });
-  }
-
-  async rename(from: string, to: string): Promise<void> {
-    const source = this.resolveInRoot(from);
-    const destination = this.resolveInRoot(to);
-    await fsp.access(source);
-    await fsp.mkdir(path.dirname(destination), { recursive: true });
-    await fsp.rename(source, destination);
-  }
-
-  private async indexFiles(): Promise<string[]> {
-    const root = this.resolveRoot();
-    const files: string[] = [];
-    const queue: string[] = [root];
-    while (queue.length > 0 && files.length < MAX_INDEX_FILES) {
-      const current = queue.shift()!;
-      let entries;
-      try {
-        entries = await fsp.readdir(current, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      for (const entry of entries) {
-        const full = path.join(current, entry.name);
-        if (entry.isDirectory()) {
-          if (IGNORED_DIRS.has(entry.name)) continue;
-          queue.push(full);
-        } else if (entry.isFile()) {
-          files.push(full);
-          if (files.length >= MAX_INDEX_FILES) break;
-        }
-      }
-    }
-    return files;
-  }
-
-  async find(query: string): Promise<FileEntry[]> {
-    const root = this.resolveRoot();
-    const files = await this.indexFiles();
-    const needle = query.trim().toLowerCase();
-    if (!needle) {
-      return files.slice(0, 50).map((file) => ({
-        name: path.basename(file),
-        path: file,
+  find(query: string): FileEntry[] {
+    return this.native()
+      .findFiles(this.resolveRoot(), query, 60)
+      .map((filePath) => ({
+        name: path.basename(filePath),
+        path: filePath,
         isDir: false,
         size: 0,
         mtime: 0,
       }));
-    }
-    const scored: Array<{ file: string; score: number }> = [];
-    for (const file of files) {
-      const relative = path.relative(root, file).toLowerCase();
-      const base = path.basename(file).toLowerCase();
-      let score = -1;
-      if (base === needle) score = 1000;
-      else if (base.startsWith(needle)) score = 800;
-      else if (base.includes(needle)) score = 600;
-      else if (fuzzyIncludes(relative, needle)) score = 400 - relative.length * 0.01;
-      if (score >= 0) scored.push({ file, score });
-    }
-    scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, 60).map(({ file }) => ({
-      name: path.basename(file),
-      path: file,
-      isDir: false,
-      size: 0,
-      mtime: 0,
-    }));
   }
 
-  async search(query: string): Promise<SearchHit[]> {
-    const needle = query.trim();
-    if (needle.length < 2) throw new Error('Search needs at least two characters');
-    const lowerNeedle = needle.toLowerCase();
-    const files = await this.indexFiles();
-    const hits: SearchHit[] = [];
-    for (const file of files) {
-      if (hits.length >= 200) break;
-      let stat;
-      try {
-        stat = await fsp.stat(file);
-      } catch {
-        continue;
-      }
-      if (stat.size > MAX_SEARCH_BYTES) continue;
-      let content: string;
-      try {
-        const buffer = await fsp.readFile(file);
-        if (isProbablyBinary(buffer)) continue;
-        content = buffer.toString('utf8');
-      } catch {
-        continue;
-      }
-      if (!content.toLowerCase().includes(lowerNeedle)) continue;
-      const lines = content.split(/\r?\n/);
-      for (let i = 0; i < lines.length; i += 1) {
-        const column = lines[i].toLowerCase().indexOf(lowerNeedle);
-        if (column >= 0) {
-          hits.push({
-            path: file,
-            line: i + 1,
-            column: column + 1,
-            preview: lines[i].trim().slice(0, 240),
-          });
-          if (hits.length >= 200) break;
-        }
-      }
-    }
-    return hits;
+  search(query: string): SearchHit[] {
+    return this.native().searchText(this.resolveRoot(), query, 200) as SearchHit[];
   }
 
-  async createProject(input: CreateProjectInput): Promise<ProjectSnapshot> {
+  createProject(input: CreateProjectInput): ProjectSnapshot {
     const name = input.name.trim();
     if (!name) throw new Error('Project name is required');
-    if (/[\\/:*?"<>|]/.test(name)) throw new Error('Project name contains characters that are not allowed in a folder name');
-    const root = path.join(path.resolve(input.parent), name);
-    await fsp.mkdir(root, { recursive: true });
-    const existing = await fsp.readdir(root);
-    if (existing.length > 0) throw new Error(`Folder ${root} already exists and is not empty`);
-    for (const [relative, content] of Object.entries(templateFiles(input.template, name))) {
-      const target = path.join(root, relative);
-      await fsp.mkdir(path.dirname(target), { recursive: true });
-      await fsp.writeFile(target, content, 'utf8');
+    if (/[\\/:*?"<>|]/.test(name)) {
+      throw new Error('Project name contains characters that are not allowed in a folder name');
     }
+    const parent = path.resolve(input.parent);
+    const root = path.join(parent, name);
+    const native = this.native();
+
+    try {
+      const existing = native.listDir(parent, root);
+      if (existing.length > 0) throw new Error(`Folder ${root} already exists and is not empty`);
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message.includes('already exists and is not empty')) throw error;
+      // The folder does not exist yet, which is the expected path.
+    }
+
+    native.createEntry(parent, root, 'folder');
+    for (const [relative, content] of Object.entries(templateFiles(input.template, name))) {
+      native.writeText(parent, path.join(root, relative), content);
+    }
+
     this.setRoot(root);
-    const tree = await this.tree(root, 2);
-    return { root, name: path.basename(root), tree, recent: [] };
+    return {
+      root,
+      name: path.basename(root),
+      tree: this.tree(root, 2),
+      recent: [],
+    };
   }
 
   dispose(): void {
     this.closeWatchers();
   }
-}
-
-function fuzzyIncludes(haystack: string, needle: string): boolean {
-  let index = 0;
-  for (const char of needle) {
-    index = haystack.indexOf(char, index);
-    if (index === -1) return false;
-    index += 1;
-  }
-  return true;
 }
 
 function templateFiles(template: CreateProjectInput['template'], name: string): Record<string, string> {

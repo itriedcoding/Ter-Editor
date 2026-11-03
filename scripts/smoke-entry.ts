@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { promises as fsp } from 'node:fs';
+import { existsSync, promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { FsService } from '../electron/services/fs';
+import { loadNativeFs } from '../electron/native/fs';
+import { TerminalService } from '../electron/services/terminal';
 import { languageForPath, isBinaryExt, labelForLanguage } from '../shared/languages';
 import { applyTextEdits, offsetAt, positionAt } from '../shared/text';
 import { fileUri, uriToPath } from '../shared/uri';
@@ -50,7 +52,9 @@ async function main(): Promise<void> {
 
   console.log('filesystem service');
   const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'ter-smoke-'));
-  const service = new FsService();
+  const nativeFs = loadNativeFs(path.resolve(__dirname, '..'));
+  await check('Rust filesystem core loads', () => assert.match(nativeFs.nativeVersion(), /ter-fs/));
+  const service = new FsService(() => nativeFs);
   try {
     const snapshot = await service.createProject({ parent: tempRoot, name: 'demo-app', template: 'web' });
     await check('project scaffold created', () => assert.equal(snapshot.name, 'demo-app'));
@@ -106,6 +110,29 @@ async function main(): Promise<void> {
       removed = true;
     }
     await check('remove deletes a directory', () => assert.equal(removed, true));
+
+    console.log('pty terminal');
+    const terminalChunks: string[] = [];
+    const terminal = new TerminalService((channel, payload) => {
+      if (channel === 'term:data') terminalChunks.push((payload as { data: string }).data);
+    }, () => tempRoot);
+    const session = terminal.create({ cwd: tempRoot, cols: 90, rows: 24 });
+    const marker = path.join(tempRoot, 'pty-ok.txt');
+    terminal.write(
+      session.id,
+      process.platform === 'win32' ? `echo done> "${marker}"\r` : `printf done > '${marker}'\r`,
+    );
+    const ptyDeadline = Date.now() + 10_000;
+    while (Date.now() < ptyDeadline && !existsSync(marker)) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    await check('pty shell runs a real command', async () => {
+      assert.equal((await fsp.readFile(marker, 'utf8')).trim(), 'done');
+      assert.ok(terminalChunks.length > 0, 'the pty produced output');
+      assert.ok(session.shell.length > 0);
+    });
+    terminal.kill(session.id);
+    terminal.disposeAll();
 
     if (process.env.SMOKE_NETWORK === '1') {
       console.log('Open VSX extension install (network)');

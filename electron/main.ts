@@ -13,13 +13,15 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promises as fsp } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import type { ChatRequest, ExtEvent, Settings } from '../shared/ipc';
+import type { ChatRequest, ExtEvent, Settings, TerminalOptions } from '../shared/ipc';
 import type { HostRequestKind, HostDelegate } from './ext/host';
 import { ExtensionHost } from './ext/host';
 import { FsService } from './services/fs';
 import { SettingsService } from './services/settings';
 import { AiService } from './services/ai';
 import { ExtensionsService } from './services/extensions';
+import { TerminalService } from './services/terminal';
+import { loadNativeFs } from './native/fs';
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 const isMac = process.platform === 'darwin';
@@ -32,7 +34,7 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-const fsService = new FsService();
+const fsService = new FsService(() => loadNativeFs(app.getAppPath()));
 const settings = new SettingsService();
 const ai = new AiService(settings);
 const extensions = new ExtensionsService();
@@ -43,6 +45,18 @@ const pendingExtensionRequests = new Map<string, { resolve: (value: unknown) => 
 
 function sendToRenderer(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+const terminalService = new TerminalService(sendToRenderer, () => fsService.getRoot());
+
+/** Prefers a generally capable model when the user has not picked one yet. */
+function pickDefaultModel(models: Array<{ id: string }>): string | null {
+  const preferences = [/claude/i, /gpt-5/i, /gpt/i, /gemini/i, /deepseek/i, /llama/i, /qwen/i];
+  for (const preference of preferences) {
+    const match = models.find((model) => preference.test(model.id));
+    if (match) return match.id;
+  }
+  return models[0]?.id ?? null;
 }
 
 const hostDelegate: HostDelegate = {
@@ -251,6 +265,14 @@ function registerIpc(): void {
   ipcMain.handle('fs:search', async (_event, query: string) => fsService.search(query));
   ipcMain.handle('fs:reveal', async (_event, target: string) => shell.showItemInFolder(target));
 
+  ipcMain.handle('term:create', async (_event, options: TerminalOptions) => terminalService.create(options));
+  ipcMain.on('term:write', (_event, id: string, data: string) => terminalService.write(id, data));
+  ipcMain.on('term:resize', (_event, id: string, cols: number, rows: number) =>
+    terminalService.resize(id, cols, rows),
+  );
+  ipcMain.on('term:kill', (_event, id: string) => terminalService.kill(id));
+  ipcMain.handle('app:native-version', async () => fsService.nativeVersion());
+
   ipcMain.on('docs:open', (_event, payload: { uri: string; languageId: string; text: string; version: number }) => {
     extensionHost?.notifyDocumentOpen(payload.uri, payload.languageId, payload.text, payload.version);
   });
@@ -279,7 +301,14 @@ function registerIpc(): void {
   ipcMain.handle('ai:has-key', async () => settings.hasKey());
   ipcMain.handle('ai:set-key', async (_event, key: string) => settings.setKey(key));
   ipcMain.handle('ai:clear-key', async () => settings.clearKey());
-  ipcMain.handle('ai:models', async (_event, force?: boolean) => ai.listModels(Boolean(force)));
+  ipcMain.handle('ai:models', async (_event, force?: boolean) => {
+    const result = await ai.listModels(Boolean(force));
+    if (result.models.length > 0 && !settings.get().model) {
+      const picked = pickDefaultModel(result.models);
+      if (picked) await settings.update({ model: picked });
+    }
+    return result;
+  });
   ipcMain.handle('ai:start', async (_event, requestId: string, request: ChatRequest) => {
     void ai.streamChat(requestId, request, (event) => sendToRenderer('ai:event', { requestId, event }));
     return true;
@@ -394,6 +423,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   ai.cancelAll();
+  terminalService.disposeAll();
   extensionHost?.dispose();
   fsService.dispose();
 });

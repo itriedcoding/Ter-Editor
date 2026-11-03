@@ -1,22 +1,28 @@
 {
   "name": "ter-editor",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Ter Editor — an AI-native desktop code editor with VS Code extension support",
   "author": {
     "name": "Ter Editor contributors",
     "email": "noreply@ter-editor.dev"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/itriedcoding/Ter-Editor.git"
+  },
   "main": "dist-electron/main.js",
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "npm run build:renderer && npm run build:main",
+    "build": "npm run build:native && npm run build:renderer && npm run build:main",
+    "build:native": "node scripts/build-native.mjs",
     "build:renderer": "vite build",
     "build:main": "node scripts/build-main.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "start": "electron .",
-    "smoke": "npm run build:main && node scripts/smoke.mjs",
+    "prepare:pty": "electron-rebuild -f -w node-pty",
+    "smoke": "npm run build:native && npm run build:main && node scripts/smoke.mjs",
     "dist": "npm run build && electron-builder",
     "dist:dir": "npm run build && electron-builder --dir"
   },
@@ -31,9 +37,16 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "native/index.js",
+      "native/*.node",
+      "node_modules/node-pty/**/*",
       "package.json",
       "LICENSE",
       "README.md"
+    ],
+    "asarUnpack": [
+      "native/*.node",
+      "node_modules/node-pty/**/*"
     ],
     "extraResources": [
       {
@@ -48,22 +61,10 @@
         "provider": "github",
         "releaseType": "release"
       }
-    ],
-    "win": {
+    ],    "win": {
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64"
-          ]
-        }
+        "nsis",
+        "zip"
       ],
       "fileAssociations": [
         {
@@ -78,24 +79,11 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false
-    },
-    "mac": {
+    },    "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
+        "dmg",
+        "zip"
       ],
       "hardenedRuntime": false
     },
@@ -122,9 +110,12 @@
     }
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "adm-zip": "^0.6.1",
     "lucide-react": "^1.66.0",
     "monaco-editor": "^0.57.0",
+    "node-pty": "^1.1.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "vscode-oniguruma": "^2.0.1",

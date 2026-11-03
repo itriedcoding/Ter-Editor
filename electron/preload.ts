@@ -85,10 +85,27 @@ const api: TerApi = {
       return () => ipcRenderer.removeListener('ext:changed', listener);
     },
   },
+  terminal: {
+    create: (options) => ipcRenderer.invoke('term:create', options),
+    write: (id, data) => ipcRenderer.send('term:write', id, data),
+    resize: (id, cols, rows) => ipcRenderer.send('term:resize', id, cols, rows),
+    kill: (id) => ipcRenderer.send('term:kill', id),
+    onData: (callback) => {
+      const listener = (_event: unknown, payload: { id: string; data: string }): void => callback(payload.id, payload.data);
+      ipcRenderer.on('term:data', listener);
+      return () => ipcRenderer.removeListener('term:data', listener);
+    },
+    onExit: (callback) => {
+      const listener = (_event: unknown, payload: { id: string; code: number }): void => callback(payload.id, payload.code);
+      ipcRenderer.on('term:exit', listener);
+      return () => ipcRenderer.removeListener('term:exit', listener);
+    },
+  },
   app: {
     openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
     showItemInFolder: (path) => ipcRenderer.invoke('app:show-item', path),
     windowControl: (action) => ipcRenderer.send('window:control', action),
+    nativeVersion: () => ipcRenderer.invoke('app:native-version'),
   },
 };
 
